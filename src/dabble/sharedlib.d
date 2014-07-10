@@ -39,9 +39,13 @@ struct SharedLib
     /**
     * Load a shared lib given a filename.
     */
-    this(string file)
+    this(string file) 
     {
-        filename = file;
+        this([file]);
+    }
+    this(string[] files)
+    {
+        filename = files[0];
         load();
     }
 
@@ -79,10 +83,10 @@ struct SharedLib
     T getFunction(T)(string name) in {assert(handle !is null, "Null handle");} body
     {            
         version(Windows)        
-            return cast(T) GetProcAddress(handle, cast(char*)(name.toStringz()));                             
-		else version(Posix)		
-			return cast(T) dlsym(handle, cast(char*)(name.toStringz()));	
-		else
-			static assert(false);
+        	return cast(T) GetProcAddress(handle, cast(char*)(name.toStringz()));                             
+	else version(Posix)		
+		return cast(T) dlsym(handle, cast(char*)(name.toStringz()));	
+	else
+		static assert(false);
     }
 }

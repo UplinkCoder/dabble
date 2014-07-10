@@ -14,37 +14,19 @@ import
 * See if the given buffer contains meta commands, which are interpreted directly
 * and do not trigger recompilation.
 */
-bool handleMetaCommand(ref string inBuffer, ref string codeBuffer)
+bool handleMetaCommand(ref string inputBuffer, ref string codeBuffer,ref Tuple!(string,Stage) res)
 {
     import std.conv : text;
     import std.process : system;
     import std.string : join;
-    import std.algorithm : canFind, map, find;
+    import std.algorithm : canFind, map, find, splitter;
     import std.range : array, front, empty;
 
-	auto origCommand = inBuffer.to!string();
-    auto parse = MetaParser.decimateTree(MetaParser(origCommand));
-
-    if (!parse.successful)
-        return false;
-
-    parse = parse.children[0];
-    auto cmd = parse.children[0].matches[0];
-
-    string[] args;
-    if (parse.children.length == 2)
-    {
-        if (parse.children[1].name == "MetaParser.MetaArgs")
-        {
-            auto seq = parse.children[1].children[0].children;
-            args.length = seq.length;
-            foreach(i, p; seq)
-                args[i] = p.matches[0];
-        }
-    }
+	// why use pegged a string switch is enough!
 
     alias T = Tuple!(string, Operation[]);
-
+	string cmd = inputBuffer.splitter(" ").array[0];
+	string[] args = inputBuffer.splitter(" ").array[1 .. $];
     /** Value print helper **/
     string printValue(T p)
     {
@@ -64,9 +46,8 @@ bool handleMetaCommand(ref string inBuffer, ref string codeBuffer)
         auto t = v.front.ty.typeOf(p[1], context.share.map);
         return t[1].length ? t[1] : t[0].toString();
     }
-
 	string summary, jsonstr;
-
+	res[1] = Stage.meta; 
     switch(cmd)
     {
         case "version":
@@ -169,21 +150,31 @@ bool handleMetaCommand(ref string inBuffer, ref string codeBuffer)
         case "clear":
         {
             if (args.length == 0)
-                clearScreen();
+			{}// clearScreen();
             else if (args.length == 1 && args[0] == "buffer")
                 codeBuffer.clear();
             break;
         }
-        case "debug on":
-			foreach(arg; args)
+        case "debug" :
+			if (args[0] == "on") {
+			foreach(arg; args[1..$])
 				setDebugLevelFromString!"on"(arg);
-			break;
-        case "debug off":
-			foreach(arg; args)
+			} else if (args[0] == "off") {
+				foreach(arg; args[1..$])
 				setDebugLevelFromString!"off"(arg);
+			} else 
+				return false;
 			break;
-        default:
+		case "help" :
+				summary ~= text("help msg");
+//				jsonstr = json("id", "meta", "cmd", "help", "summary", summary.escapeJSON(), "data", msg);
+			break;
+		case "exit" : 
+			res[1] = Stage.none;
+			break;
+		default:
 			return false;
+
     }
 
 	// If we got to here, we successfully parsed a meta command, so clear the code buffer

@@ -74,46 +74,6 @@ BB:
 
 
 /**
-* Handle meta commands
-*/
-mixin(grammar(`
-
-MetaParser:
-
-    MetaCommand <- MetaPrint MetaArgs?
-                 / MetaType MetaArgs?
-                 / MetaDelete MetaArgs
-                 / MetaReset MetaArgs
-                 / MetaDebugOn MetaArgs
-                 / MetaDebugOff MetaArgs
-                 / MetaUse MetaArgs
-                 / MetaClear MetaArgs?
-                 / MetaVersion
-				 / MetaHistory
-
-    MetaPrint    <- 'print'
-    MetaType     <- 'type'
-    MetaDelete   <- 'delete'
-    MetaReset    <- 'reset'
-    MetaUse      <- 'use'
-    MetaDebugOn  <~ ('debug' wx 'on')
-    MetaDebugOff <~ ('debug' wx 'off')
-    MetaClear    <- 'clear'
-    MetaVersion  <- 'version'
-	MetaHistory  <- 'history'
-
-    MetaArgs <- (wxd Seq(MetaArg, ','))
-    MetaArg  <- ~((!(endOfLine / ',') .)*)
-
-    w   <- ' ' / '\t' / endOfLine    
-    wx  <- ;(w?) :(w*)
-    wxd  <- :(w*)   
-    Seq(T, Sep) <- wxd T wxd (Sep wxd T wxd)*
-    
-`));
-
-
-/**
 * Print-expression parser
 */
 mixin(grammar(`

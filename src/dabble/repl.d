@@ -7,6 +7,7 @@ Copyright: Copyright Callum Anderson 2013
 License:   $(WEB boost.org/LICENSE_1_0.txt, Boost License 1.0).
 Authors:   Callum Anderson
 **/
+// TODO factorOut ConsolSession;
 
 module dabble.repl;
 
@@ -20,6 +21,7 @@ import
 import std.typecons : Tuple, tuple;
 
 import
+	dabble.consoleinterface,
 	dabble.meta,
     dabble.parser,    
     dabble.util,
@@ -108,11 +110,11 @@ void loop()
     assert(context.initalized, "Context not initalized");
 	
 	string input, codeBuffer;	        
-    if (consoleSession)
+    
 	{
-        clearScreen();
-		writeln(title());
-		write(prompt());				
+		if (consoleSession) dabble.consoleinterface.clearScreen();
+		send(title());
+		send(prompt(),false);				
 	}
  	
 	do
@@ -122,14 +124,14 @@ void loop()
 		
 		if (codeBuffer.length) // multiLine	
 		{
-			consoleSession ? prompt(true).send(false) : json("id", "parse-multiline").send;									
+			json("id", "parse-multiline").send;									
 		}
 		else		
 		{					
 			if (r[1] == Stage.call)				
-				consoleSession  ? r[0].send : splitMessages(r[0]);											
+				splitMessages(r[0]);											
 				
-			if (consoleSession)
+//			if (consoleSession)
 				prompt().send(false);
 		}
 		                        		
@@ -207,11 +209,12 @@ Tuple!(string, Stage) eval(string inBuffer, ref string codeBuffer)
     bool multiLine = codeBuffer.length > 0;
     auto newInput = strip(inBuffer);
 
-    if (newInput.toLower() == "exit")
-        return result;
-
-	if (handleMetaCommand(newInput, codeBuffer))
-		return tuple("", Stage.meta);
+//    if (newInput.toLower() == "exit") { // should me a MetaCommand
+//		writeln(result==typeof(result).init);
+//		return result;
+//	}
+	if (handleMetaCommand(newInput, codeBuffer,result))
+		return result;
 		
 	if (newInput.length > 0)
 	{
@@ -302,8 +305,9 @@ struct ReplContext
     string vtblFixup;
     uint debugLevel = Debug.none;
 
-    Tuple!(string,"filename",string,"tempPath") paths;
+    Tuple!(string,"filename",string,"tempPath",string,"invokePath") paths;
     Tuple!(string,"path",string,"name",long,"modified")[] userModules;
+    Tuple!(string,"path",string,"name")[] staticModules; 
 
     private bool _initalized = false;
 
@@ -338,6 +342,7 @@ struct ReplContext
 		DMDMessage[] errors;
         if (!buildUserModules(errors, true))
             throw new Exception("Unable to build defs.d, " ~ errors.map!(x => text(x.sourceCode, ":", x.errorMessage)).join("\n"));
+        //TODO build staticModules
 
         _initalized = true;
     }
@@ -376,27 +381,8 @@ string title()
 /**
 * Clear the command window.
 */
-void clearScreen()
-{
-    import std.process : system;
-
-    if (!consoleSession)
-        return;
-
-    version(Windows)
-    {
-        system("cls");
-    }
-    else version(Posix)
-    {
-        system("clear");
-    }
-    else
-    {
-        pragma(msg, "Need to implement clearScreen for this platform");
-    }
-}
-
+deprecated("now in dabble.consoleinterface")
+	alias clearScreen = dabble.consoleinterface.clearScreen;  
 
 /**
 * Turn a debug level on or off, using a string to identify the debug level.
@@ -444,7 +430,7 @@ Tuple!(string, Stage) evaluate(string code)
     if (context.debugLevel & Debug.parseOnly)
     {
 		auto summary = "Parse only:" ~ newl ~ parsedCode;
-		consoleSession ? summary.send : json("id", "parse-parseOnly", "summary", parsedCode.escapeJSON()).send;
+		json("id", "parse-parseOnly", "summary", parsedCode.escapeJSON()).send;
 		return tuple("", Stage.parse);
     }
 
@@ -465,7 +451,7 @@ Tuple!(string, Stage) evaluate(string code)
 	if (!callResult)
     {
 		auto summary = "Internal error: " ~ replResult;
-		consoleSession ? summary.send : json("id", "call-internal-error", "summary", replResult.escapeJSON()).send;
+		json("id", "call-internal-error", "summary", replResult.escapeJSON()).send;
 		return tuple("", Stage.call);
     }
 
@@ -494,7 +480,7 @@ bool parse(string code, out string parsedCode)
     import std.algorithm : canFind, countUntil;
     import std.conv : text;
     import std.string : join, splitLines;
-
+    
     string[] dupSearchList;
 
     /** Handlers for the parser **/
@@ -537,7 +523,6 @@ bool parse(string code, out string parsedCode)
 		}
 				
 		auto summary = text("Parser error", parser.errors.length > 1 ? "s:" : ":", newl, niceErrors.join(newl));
-		consoleSession ? summary.send : 
 			json("id", "parse-error", "summary", summary.escapeJSON(), "errors", 
 				parser.errors.map!(t => tuple("source", t[0] > 0 ? lines[t[0]-1].escapeJSON() : "", "column", t[1], "error", t[2].escapeJSON())).array).send;
 		return false;
@@ -547,7 +532,12 @@ bool parse(string code, out string parsedCode)
 
     foreach(d; dupSearchList)
     {
-        auto index = context.share.vars.countUntil!( (a,b) => a.name == b )(d);
+        // workaround countUntil
+        int index=-1;
+        foreach(uint i,Var currVar;context.share.vars)
+          if(currVar.name == d) index = i;
+
+        //auto index = context.share.vars.countUntil!((a,b) => a.getName == b )(d);
         assert(index >= 0, "Parser: undefined var in string dups");
         c.suffix.put("if (!_repl_.vars[" ~ index.to!string() ~ "].func) { "
                         "_REPL.dupSearch(*" ~ d ~ ", _repl_.imageBounds[0], _repl_.imageBounds[1], _repl_.keepAlive); }\n");
@@ -648,8 +638,7 @@ bool build(string code)
     if (!timeIt("build - userMod", buildUserModules(errors)))
     {
 		auto summary = "Failed building user modules: errors follow:" ~ newl ~ errors.map!(e => e.toStr()).join(newl);					
-		consoleSession ? summary.send :
-			json("id", "build-error-usermod", "summary", summary.escapeJSON(), "data", errors.map!(e => e.toTup()).array).send;
+		json("id", "build-error-usermod", "summary", summary.escapeJSON(), "data", errors.map!(e => e.toTup()).array).send;
 	} 
 
     auto dirChange = "cd " ~ escapeShellFileName(context.paths.tempPath);
@@ -657,7 +646,7 @@ bool build(string code)
 	version(Windows)
 		auto dmdFlags = ["-L/NORELOCATIONCHECK", "-L/NOMAP", "-shared"];
 	else version(Posix)
-		auto dmdFlags = ["-of" ~ context.filename ~ ".so", "-fPIC", "-shared", "-defaultlib=libphobos2.so"];
+		auto dmdFlags = ["-of" ~ context.filename ~ ".so", "-fPIC", "-shared", "-defaultlib=libphobos2.so"/*,"-lstaticModules.so */ ];
 	else
 		static assert(false, "Implement 'build' for this platform");
 	
@@ -683,13 +672,11 @@ bool build(string code)
 		auto summary = "Internal error: test compile passed, full build failed. Error follows:" ~ newl ~ 
 			fullBuildErrors.map!(e => e.toStr()).join(newl);
 			
-		consoleSession ? summary.send :
 			json("id", "build-error-internal", "summary", summary.escapeJSON(), "data", fullBuildErrors.map!(e => e.toTup()).array).send;
 	}
 	else
 	{		
 		auto summary = errors.map!(e => e.toStr()).join(newl);					
-		consoleSession ? summary.send :
 			json("id", "build-error", "summary", summary.escapeJSON(), "data", errors.map!(e => e.toTup()).array).send;
 	}
 	return false;
@@ -738,6 +725,16 @@ bool testCompile(out DMDMessage[] errors)
 	return true;
 }
 
+/** 
+* Add a _static_ dependency module and avoid constant recompilation
+*/  
+void addStaticUserModule(string moduleName) 
+{
+	import std.path:baseName,dirName;
+     //assert(1==-1,"addStaticUserModule Not Impemented yet");
+	alias StaticModule  = ElementType!(typeof(context.staticModules));
+	context.staticModules ~= StaticModule(dirName(moduleName),baseName(moduleName));
+}
 
 /**
 * Rebuild user modules into a lib to link with. Only rebuild files that have changed.
@@ -1026,9 +1023,9 @@ DMDMessage[] parseDmdErrorFile(string srcFile, string errFile, bool dederef)
 @property void send(string s, bool newline = true)
 {
 	if (newline)
-		consoleSession ? writeln(s) : writeln(sterm, s, sterm);
+		writeln(sterm, s, sterm);
 	else
-		consoleSession ? write(s) : write(sterm, s, sterm);
+		write(sterm, s, sterm);
 	stdout.flush();
 }
 

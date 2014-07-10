@@ -28,10 +28,14 @@ void parseArgs(char[][] args)
     import std.string : toLower;
 	import std.stdio: writeln;
     
-    foreach(arg; args)
+    foreach(uint i,arg; args)
     {
         switch(arg.toLower())
         {
+            case "-i" : 
+               writeln("Would include ",args[i+1]);
+               /* dabble.repl.addStaticModule (args[i+1]) */ 
+	    break;	
             case "--noconsole":  dabble.repl.consoleSession = false; break;
             case "--showtimes":  addDebugLevel(Debug.times);      break;            
             case "--parseonly":  addDebugLevel(Debug.parseOnly);  break;
